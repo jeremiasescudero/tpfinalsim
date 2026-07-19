@@ -1,31 +1,16 @@
 """
-Simulación - Estación de Servicio
-UTN FRC - Materia Simulación
+Simulacion - Estacion de Servicio
+UTN FRC - Materia Simulacion
 
-Sistema por defecto (todo es parametrizable desde CLI):
-  - 3 surtidores de combustible (1 empleado c/u)
-  - 2 empleados de gomería (independientes)
-  - 1 empleado de accesorios
-
-Distribuciones por defecto (tiempos internos en segundos):
-  - Llegadas:              Normal(media=24, desv=23)
-  - Carga de combustible:  Uniforme(media=50, ±5)               -> 50" ± 5"
-  - Gomería:               Uniforme(media=1080, ±480)           -> 18' ± 8'
-  - Accesorios:            Uniforme(media=180, ±120)            ->  3' ± 2'
+Distribuciones por defecto:
+  - Llegadas:              Normal(media=24", desv=23")
+  - Carga de combustible:  Uniforme(45", 55")           -> 50" +/- 5"
+  - Gomeria:               Uniforme(10', 26')            -> 18' +/- 8'
+  - Accesorios:            Uniforme(1', 5')              ->  3' +/- 2'
 
 Ruteo por defecto:
-  - 80 % carga combustible.
-        Al terminar: 30 % accesorios, 20 % gomería, 50 % se retira.
-  - 20 % NO carga combustible:
-        de ese resto: 40 % accesorios, 60 % gomería.
-
-Salida:
-  Tabla HTML con una fila por evento y columnas agrupadas por sección
-  (evento, próxima llegada, ruteo, servicios, servidores, colas, estadísticas)
-  + una columna dinámica por cliente activo (con su estado).
-
-  Se puede acotar la vista con --desde N y --cantidad K (simular todo,
-  mostrar solo K filas a partir de la fila N).
+  80% carga combustible -> de esos: 30% acc, 20% gom, 50% sale.
+  20% no carga -> 40% acc, 60% gom.
 """
 
 from __future__ import annotations
@@ -35,55 +20,39 @@ import html
 import math
 import random
 import webbrowser
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 
-# ---------------------------------------------------------------------------
-# Configuración de la simulación
-# ---------------------------------------------------------------------------
 @dataclass
 class Config:
-    # cantidades
     n_clientes: int = 500
     n_surtidores: int = 3
     n_gomerias: int = 2
     n_accesorios: int = 1
 
-    # llegadas: Normal(media, desv) en segundos
     lleg_media: float = 24.0
     lleg_desv: float = 23.0
 
-    # carga combustible: Uniforme(media - semi, media + semi) en segundos
-    carga_media: float = 50.0
-    carga_semi: float = 5.0
+    # uniformes: A y B directos, internamente en minutos
+    carga_a: float = 45.0       # segundos
+    carga_b: float = 55.0       # segundos
+    gom_a: float = 10.0         # minutos
+    gom_b: float = 26.0         # minutos
+    acc_a: float = 1.0          # minutos
+    acc_b: float = 5.0          # minutos
 
-    # gomería: Uniforme(media - semi, media + semi) en segundos
-    gom_media: float = 18 * 60.0
-    gom_semi: float = 8 * 60.0
+    p_carga: float = 0.80
+    p_no_carga_acc: float = 0.40
+    p_post_carga_acc: float = 0.30
+    p_post_carga_gom: float = 0.20
 
-    # accesorios: Uniforme(media - semi, media + semi) en segundos
-    acc_media: float = 3 * 60.0
-    acc_semi: float = 2 * 60.0
-
-    # probabilidades de ruteo
-    p_carga: float = 0.80             # P(nuevo cliente -> combustible)
-    p_no_carga_acc: float = 0.40      # P(no-carga -> accesorios)  (resto -> gomería)
-    p_post_carga_acc: float = 0.30    # P(post-carga -> accesorios)
-    p_post_carga_gom: float = 0.20    # P(post-carga -> gomería)   (resto -> se retira)
-
-    # semilla
     semilla: Optional[int] = None
-
-    # ventana de visualización
     desde: int = 0
-    cantidad: Optional[int] = None    # None = todas desde 'desde'
+    cantidad: Optional[int] = None
 
 
-# ---------------------------------------------------------------------------
-# Utilidades de generación de variables aleatorias
-# ---------------------------------------------------------------------------
 def rnd() -> float:
     return random.random()
 
@@ -94,16 +63,12 @@ def rnd_uniforme(a: float, b: float) -> tuple[float, float]:
 
 
 def rnd_normal(media: float, desv: float) -> tuple[float, float, float]:
-    """Box-Muller. Devuelve (rnd1, rnd2, valor)."""
     r1 = rnd()
     r2 = rnd()
     z = math.sqrt(-2 * math.log(r1)) * math.cos(2 * math.pi * r2)
     return r1, r2, media + desv * z
 
 
-# ---------------------------------------------------------------------------
-# Modelo
-# ---------------------------------------------------------------------------
 @dataclass
 class Cliente:
     id: int
@@ -130,9 +95,6 @@ class Estadisticas:
     id_cliente_max_tiempo: int = 0
 
 
-# ---------------------------------------------------------------------------
-# Simulación
-# ---------------------------------------------------------------------------
 class Simulacion:
     def __init__(self, cfg: Config):
         self.cfg = cfg
@@ -149,7 +111,7 @@ class Simulacion:
 
         self.surtidores = [Servidor(f"Surtidor {i+1}")
                            for i in range(cfg.n_surtidores)]
-        self.gomerias = [Servidor(f"Gomería {i+1}")
+        self.gomerias = [Servidor(f"Gomeria {i+1}")
                          for i in range(cfg.n_gomerias)]
         self.accesorios_list = [Servidor(f"Accesorios {i+1}"
                                 if cfg.n_accesorios > 1 else "Accesorios")
@@ -161,11 +123,10 @@ class Simulacion:
 
         self.clientes: dict[int, Cliente] = {}
         self.prox_id = 1
-        self.arribados = 0                  # cuántos entraron al sistema
+        self.arribados = 0
 
         self.stats = Estadisticas()
 
-        # valores aleatorios del evento actual (para pintar solo esa fila)
         self.ult_rnd_carga: Optional[float] = None
         self.ult_t_carga: Optional[float] = None
         self.ult_rnd_gom: Optional[float] = None
@@ -179,10 +140,8 @@ class Simulacion:
 
         self.filas: list[dict] = []
 
-    # ---------- helpers -------------------------------------------------
     def _programar_prox_llegada(self):
         if self.arribados >= self.cfg.n_clientes:
-            # ya no llegan más clientes
             self.prox_llegada = float("inf")
             self.rnd_lleg1 = self.rnd_lleg2 = self.t_lleg = None
             return
@@ -215,9 +174,7 @@ class Simulacion:
             self.cola_surtidor.append(cliente)
             cliente.estado = "En cola surtidor"
         else:
-            a = self.cfg.carga_media - self.cfg.carga_semi
-            b = self.cfg.carga_media + self.cfg.carga_semi
-            r, dur = rnd_uniforme(a, b)
+            r, dur = rnd_uniforme(self.cfg.carga_a, self.cfg.carga_b)
             self._asignar(s, cliente, r, dur, "Cargando comb.",
                           "ult_rnd_carga", "ult_t_carga")
 
@@ -225,12 +182,13 @@ class Simulacion:
         s = self._libre(self.gomerias)
         if s is None:
             self.cola_gomeria.append(cliente)
-            cliente.estado = "En cola gomería"
+            cliente.estado = "En cola gomeria"
         else:
-            a = self.cfg.gom_media - self.cfg.gom_semi
-            b = self.cfg.gom_media + self.cfg.gom_semi
-            r, dur = rnd_uniforme(a, b)
-            self._asignar(s, cliente, r, dur, "En gomería",
+            # A y B en minutos -> convertir a segundos
+            a_seg = self.cfg.gom_a * 60
+            b_seg = self.cfg.gom_b * 60
+            r, dur = rnd_uniforme(a_seg, b_seg)
+            self._asignar(s, cliente, r, dur, "En gomeria",
                           "ult_rnd_gom", "ult_t_gom")
 
     def _iniciar_accesorios(self, cliente: Cliente):
@@ -239,9 +197,10 @@ class Simulacion:
             self.cola_accesorios.append(cliente)
             cliente.estado = "En cola accesorios"
         else:
-            a = self.cfg.acc_media - self.cfg.acc_semi
-            b = self.cfg.acc_media + self.cfg.acc_semi
-            r, dur = rnd_uniforme(a, b)
+            # A y B en minutos -> convertir a segundos
+            a_seg = self.cfg.acc_a * 60
+            b_seg = self.cfg.acc_b * 60
+            r, dur = rnd_uniforme(a_seg, b_seg)
             self._asignar(s, cliente, r, dur, "Accesorios",
                           "ult_rnd_acc", "ult_t_acc")
 
@@ -254,7 +213,6 @@ class Simulacion:
             self.stats.id_cliente_max_tiempo = cliente.id
         self.clientes.pop(cliente.id, None)
 
-    # ---------- eventos --------------------------------------------------
     def _evento_llegada(self):
         c = Cliente(id=self.prox_id, llegada=self.reloj)
         self.prox_id += 1
@@ -274,7 +232,7 @@ class Simulacion:
                 c.ruta = "solo accesorios"
                 self._iniciar_accesorios(c)
             else:
-                c.ruta = "solo gomería"
+                c.ruta = "solo gomeria"
                 self._iniciar_gomeria(c)
 
         self._programar_prox_llegada()
@@ -295,7 +253,7 @@ class Simulacion:
             cliente.ruta += " -> accesorios"
             self._iniciar_accesorios(cliente)
         elif r < gom_hasta:
-            cliente.ruta += " -> gomería"
+            cliente.ruta += " -> gomeria"
             self._iniciar_gomeria(cliente)
         else:
             cliente.ruta += " -> salida"
@@ -316,7 +274,6 @@ class Simulacion:
         if self.cola_accesorios:
             self._iniciar_accesorios(self.cola_accesorios.pop(0))
 
-    # ---------- loop principal -------------------------------------------
     def _actualizar_maximos(self):
         self.stats.cola_max_surtidor = max(
             self.stats.cola_max_surtidor, len(self.cola_surtidor))
@@ -356,13 +313,13 @@ class Simulacion:
 
     def ejecutar(self):
         self._programar_prox_llegada()
-        self._registrar_fila("Inicialización")
+        self._registrar_fila("Inicializacion")
         self._limpiar_valores_evento()
 
         while True:
             nombre, t, servidor = self._proximo_evento()
             if t == float("inf"):
-                break               # no quedan eventos por procesar
+                break
             self.reloj = t
             self.n_evento += 1
 
@@ -370,7 +327,7 @@ class Simulacion:
                 self._evento_llegada()
             elif nombre.startswith("Fin carga"):
                 self._fin_carga(servidor)               # type: ignore[arg-type]
-            elif "Gomería" in nombre:
+            elif "Gomeria" in nombre:
                 self._fin_gomeria(servidor)             # type: ignore[arg-type]
             elif "Accesorios" in nombre:
                 self._fin_accesorios(servidor)          # type: ignore[arg-type]
@@ -379,7 +336,6 @@ class Simulacion:
             self._registrar_fila(nombre)
             self._limpiar_valores_evento()
 
-    # ---------- registro de filas ----------------------------------------
     def _registrar_fila(self, evento: str):
         fila = {
             "N": self.n_evento,
@@ -388,10 +344,10 @@ class Simulacion:
 
             "RND1 lleg.": self.rnd_lleg1,
             "RND2 lleg.": self.rnd_lleg2,
-            "Δ llegada (s)": self.t_lleg,
-            "Próx. llegada": (round(self.prox_llegada, 2)
+            "T entre lleg. (s)": self.t_lleg,
+            "Prox. llegada": (round(self.prox_llegada, 2)
                               if self.prox_llegada != float("inf")
-                              else "—"),
+                              else "---"),
 
             "RND tipo": self.ult_rnd_tipo,
             "RND subruta": self.ult_rnd_sub,
@@ -400,14 +356,13 @@ class Simulacion:
             "RND carga": self.ult_rnd_carga,
             "T carga (s)": self.ult_t_carga,
 
-            "RND gomería": self.ult_rnd_gom,
-            "T gomería (s)": self.ult_t_gom,
+            "RND gomeria": self.ult_rnd_gom,
+            "T gomeria (s)": self.ult_t_gom,
 
             "RND acces.": self.ult_rnd_acc,
             "T acces. (s)": self.ult_t_acc,
         }
 
-        # columnas de servidores (dinámicas según cantidad configurada)
         for s in self.surtidores + self.gomerias + self.accesorios_list:
             fila[s.nombre] = self._estado_servidor(s)
 
@@ -415,10 +370,10 @@ class Simulacion:
         fila["Cola gom."] = len(self.cola_gomeria)
         fila["Cola acces."] = len(self.cola_accesorios)
 
-        fila["Máx cola surt."] = self.stats.cola_max_surtidor
-        fila["Máx cola gom."] = self.stats.cola_max_gomeria
-        fila["Máx cola acces."] = self.stats.cola_max_accesorios
-        fila["Máx T sistema (s)"] = round(self.stats.tiempo_max_sistema, 2)
+        fila["Max cola surt."] = self.stats.cola_max_surtidor
+        fila["Max cola gom."] = self.stats.cola_max_gomeria
+        fila["Max cola acces."] = self.stats.cola_max_accesorios
+        fila["Max T sistema (s)"] = round(self.stats.tiempo_max_sistema, 2)
 
         for cid in sorted(self.clientes.keys()):
             fila[f"C{cid}"] = self.clientes[cid].estado
@@ -431,58 +386,6 @@ class Simulacion:
         return f"C{s.cliente.id} (fin {round(s.fin, 1)})"
 
 
-# ---------------------------------------------------------------------------
-# Renderizado a HTML
-# ---------------------------------------------------------------------------
-CSS = """
-:root { color-scheme: light dark; }
-body {
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    margin: 24px; background: #fafafa; color: #111;
-}
-h1 { font-size: 20px; margin-bottom: 4px; }
-.resumen {
-    background: #fff; border: 1px solid #ddd; padding: 12px 16px;
-    border-radius: 8px; display: inline-block; margin: 8px 0 16px 0;
-    box-shadow: 0 1px 3px rgba(0,0,0,.06);
-}
-.resumen div { margin: 2px 0; }
-.cols { display: flex; gap: 32px; }
-.tabla-wrap { overflow-x: auto; border: 1px solid #ccc; border-radius: 6px; }
-table { border-collapse: collapse; font-size: 12px; white-space: nowrap; }
-th, td {
-    padding: 4px 8px; text-align: right;
-    border-right: 1px solid #e0e0e0; border-bottom: 1px solid #eee;
-}
-th { position: sticky; top: 0; z-index: 2; font-weight: 600; }
-tbody tr:nth-child(even) { background: #f5f7fb; }
-tbody tr:hover { background: #eef3ff; }
-
-th.evt      { background: #37474f; color: #fff; }
-th.lleg     { background: #1976d2; color: #fff; }
-th.ruta     { background: #6a1b9a; color: #fff; }
-th.srv-carga{ background: #ef6c00; color: #fff; }
-th.srv-gom  { background: #2e7d32; color: #fff; }
-th.srv-acc  { background: #c2185b; color: #fff; }
-th.servs    { background: #455a64; color: #fff; }
-th.colas    { background: #00838f; color: #fff; }
-th.stats    { background: #b71c1c; color: #fff; }
-th.cli      { background: #5d4037; color: #fff; }
-
-td.evento{ text-align: left; font-weight: 600; }
-td.cli   { text-align: left; font-family: ui-monospace, Consolas, monospace; }
-
-@media (prefers-color-scheme: dark) {
-    body { background: #111; color: #eee; }
-    .resumen { background: #1c1c1c; border-color: #333; }
-    .tabla-wrap { border-color: #333; }
-    th, td { border-color: #2a2a2a; }
-    tbody tr:nth-child(even) { background: #1a1a1a; }
-    tbody tr:hover { background: #263043; }
-}
-"""
-
-
 def _fmt(v) -> str:
     if v is None:
         return ""
@@ -491,253 +394,61 @@ def _fmt(v) -> str:
     return str(v)
 
 
-def a_html(sim: Simulacion, ruta: Path):
-    cfg = sim.cfg
-
-    # ventana
-    inicio = max(0, cfg.desde)
-    fin = (inicio + cfg.cantidad) if cfg.cantidad is not None else len(sim.filas)
-    fin = min(fin, len(sim.filas))
-    ventana = sim.filas[inicio:fin]
-    total_filas = len(sim.filas)
-
-    # grupos de columnas fijas
-    nombres_surt = [s.nombre for s in sim.surtidores]
-    nombres_gom = [s.nombre for s in sim.gomerias]
-    nombres_acc = [s.nombre for s in sim.accesorios_list]
-
-    grupos = [
-        ("evt", "Evento", ["N", "Evento", "Reloj (s)"]),
-        ("lleg", "Próxima llegada",
-            ["RND1 lleg.", "RND2 lleg.", "Δ llegada (s)", "Próx. llegada"]),
-        ("ruta", "Ruteo cliente",
-            ["RND tipo", "RND subruta", "RND post-carga"]),
-        ("srv-carga", "Servicio: carga", ["RND carga", "T carga (s)"]),
-        ("srv-gom", "Servicio: gomería", ["RND gomería", "T gomería (s)"]),
-        ("srv-acc", "Servicio: accesorios", ["RND acces.", "T acces. (s)"]),
-        ("servs", "Estado servidores",
-            nombres_surt + nombres_gom + nombres_acc),
-        ("colas", "Longitud colas",
-            ["Cola surt.", "Cola gom.", "Cola acces."]),
-        ("stats", "Estadísticas máximas",
-            ["Máx cola surt.", "Máx cola gom.", "Máx cola acces.",
-             "Máx T sistema (s)"]),
-    ]
-
-    # columnas dinámicas de clientes: solo los que aparecen en la ventana
-    dinam = set()
-    for f in ventana:
-        for k in f.keys():
-            if k.startswith("C") and k[1:].isdigit():
-                dinam.add(k)
-    dinam_orden = sorted(dinam, key=lambda x: int(x[1:]))
-
-    # encabezado banda (grupo)
-    thead_1 = ""
-    for clave, titulo, cols in grupos:
-        thead_1 += (f'<th class="{clave}" colspan="{len(cols)}">'
-                    f'{html.escape(titulo)}</th>')
-    if dinam_orden:
-        thead_1 += (f'<th class="cli" colspan="{len(dinam_orden)}">'
-                    f'Objetos temporales (clientes)</th>')
-
-    # encabezado columna
-    thead_2 = ""
-    for clave, _, cols in grupos:
-        for c in cols:
-            thead_2 += f'<th class="{clave}">{html.escape(c)}</th>'
-    for c in dinam_orden:
-        thead_2 += f'<th class="cli">{html.escape(c)}</th>'
-
-    filas_html = []
-    for f in ventana:
-        celdas = []
-        for clave, _, cols in grupos:
-            for c in cols:
-                extra_class = "evento" if c == "Evento" else ""
-                celdas.append(
-                    f'<td class="{clave} {extra_class}">{_fmt(f.get(c))}</td>')
-        for c in dinam_orden:
-            celdas.append(f'<td class="cli">{_fmt(f.get(c, ""))}</td>')
-        filas_html.append("<tr>" + "".join(celdas) + "</tr>")
-
-    tmax_min = sim.stats.tiempo_max_sistema / 60
-
-    resumen_izq = f"""
-        <div><b>Clientes configurados:</b> {cfg.n_clientes}</div>
-        <div><b>Clientes arribados:</b> {sim.arribados}</div>
-        <div><b>Eventos totales:</b> {total_filas - 1}
-             &nbsp;<i>(mostrando {len(ventana)}: filas {inicio}–{inicio+len(ventana)-1})</i></div>
-        <div><b>Semilla:</b> {cfg.semilla if cfg.semilla is not None else 'aleatoria'}</div>
-    """
-    resumen_der = f"""
-        <div><b>Cola máx surtidores:</b> {sim.stats.cola_max_surtidor}</div>
-        <div><b>Cola máx gomería:</b> {sim.stats.cola_max_gomeria}</div>
-        <div><b>Cola máx accesorios:</b> {sim.stats.cola_max_accesorios}</div>
-        <div><b>T máx en sistema:</b>
-             {sim.stats.tiempo_max_sistema:.2f} s ({tmax_min:.2f} min)
-             — cliente C{sim.stats.id_cliente_max_tiempo}</div>
-    """
-
-    params = f"""
-        <div><b>Llegadas:</b> Normal(μ={cfg.lleg_media}, σ={cfg.lleg_desv}) s</div>
-        <div><b>Carga:</b> Uniforme({cfg.carga_media}±{cfg.carga_semi}) s</div>
-        <div><b>Gomería:</b> Uniforme({cfg.gom_media}±{cfg.gom_semi}) s</div>
-        <div><b>Accesorios:</b> Uniforme({cfg.acc_media}±{cfg.acc_semi}) s</div>
-        <div><b>Servidores:</b> {cfg.n_surtidores} surt, {cfg.n_gomerias} gom, {cfg.n_accesorios} acc</div>
-        <div><b>Ruteo:</b> p(carga)={cfg.p_carga};
-             no-carga→acc={cfg.p_no_carga_acc};
-             post-carga: acc={cfg.p_post_carga_acc}, gom={cfg.p_post_carga_gom}</div>
-    """
-
-    doc = f"""<!DOCTYPE html>
-<html lang="es"><head><meta charset="utf-8">
-<title>Simulación Estación de Servicio</title>
-<style>{CSS}</style></head><body>
-<h1>Simulación — Estación de Servicio</h1>
-<div class="cols">
-    <div class="resumen">{resumen_izq}</div>
-    <div class="resumen">{resumen_der}</div>
-    <div class="resumen">{params}</div>
-</div>
-<div class="tabla-wrap">
-<table>
-    <thead>
-        <tr>{thead_1}</tr>
-        <tr>{thead_2}</tr>
-    </thead>
-    <tbody>
-        {''.join(filas_html)}
-    </tbody>
-</table>
-</div>
-</body></html>"""
-
-    ruta.write_text(doc, encoding="utf-8")
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-def parse_args() -> Config:
+def main():
     p = argparse.ArgumentParser(
-        description="Simulación estación de servicio (UTN - Simulación)",
+        description="Simulacion estacion de servicio (UTN - Simulacion)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-
-    g_sim = p.add_argument_group("Simulación")
-    g_sim.add_argument("-n", "--clientes", type=int, default=500,
-                       help="Cantidad total de clientes a simular")
-    g_sim.add_argument("-s", "--semilla", type=int, default=None,
-                       help="Semilla del generador aleatorio")
-
-    g_vista = p.add_argument_group("Ventana de visualización (filas mostradas)")
-    g_vista.add_argument("--desde", type=int, default=0,
-                         help="Índice de la primera fila a mostrar")
-    g_vista.add_argument("--cantidad", type=int, default=None,
-                         help="Cantidad de filas a mostrar (por defecto: todas)")
-    g_vista.add_argument("-o", "--salida", type=str,
-                         default="estacion_servicio.html",
-                         help="Archivo HTML de salida")
-    g_vista.add_argument("--abrir", action="store_true",
-                         help="Abrir el HTML en el navegador al terminar")
-
-    g_srv = p.add_argument_group("Servidores")
-    g_srv.add_argument("--surtidores", type=int, default=3)
-    g_srv.add_argument("--gomerias", type=int, default=2)
-    g_srv.add_argument("--accesorios", type=int, default=1)
-
-    g_lleg = p.add_argument_group("Llegadas (Normal, en segundos)")
-    g_lleg.add_argument("--lleg-media", type=float, default=24.0)
-    g_lleg.add_argument("--lleg-desv", type=float, default=23.0)
-
-    g_carga = p.add_argument_group("Carga de combustible (Uniforme, en segundos)")
-    g_carga.add_argument("--carga-media", type=float, default=50.0)
-    g_carga.add_argument("--carga-semi", type=float, default=5.0,
-                         help="Semi-amplitud: usa media±semi (50±5)")
-
-    g_gom = p.add_argument_group("Gomería (Uniforme, en segundos)")
-    g_gom.add_argument("--gom-media", type=float, default=18 * 60.0,
-                       help="Default 1080 s (18 min)")
-    g_gom.add_argument("--gom-semi", type=float, default=8 * 60.0,
-                       help="Default 480 s (8 min)")
-
-    g_acc = p.add_argument_group("Accesorios (Uniforme, en segundos)")
-    g_acc.add_argument("--acc-media", type=float, default=3 * 60.0,
-                       help="Default 180 s (3 min)")
-    g_acc.add_argument("--acc-semi", type=float, default=2 * 60.0,
-                       help="Default 120 s (2 min)")
-
-    g_rut = p.add_argument_group("Probabilidades de ruteo")
-    g_rut.add_argument("--p-carga", type=float, default=0.80,
-                       help="P(cliente nuevo -> combustible)")
-    g_rut.add_argument("--p-no-carga-acc", type=float, default=0.40,
-                       help="P(no-carga -> accesorios); resto -> gomería")
-    g_rut.add_argument("--p-post-carga-acc", type=float, default=0.30,
-                       help="P(post-carga -> accesorios)")
-    g_rut.add_argument("--p-post-carga-gom", type=float, default=0.20,
-                       help="P(post-carga -> gomería); resto -> se retira")
+    p.add_argument("-n", "--clientes", type=int, default=500)
+    p.add_argument("-s", "--semilla", type=int, default=None)
+    p.add_argument("--desde", type=int, default=0)
+    p.add_argument("--cantidad", type=int, default=None)
+    p.add_argument("-o", "--salida", type=str, default="estacion_servicio.html")
+    p.add_argument("--abrir", action="store_true")
+    p.add_argument("--surtidores", type=int, default=3)
+    p.add_argument("--gomerias", type=int, default=2)
+    p.add_argument("--accesorios", type=int, default=1)
+    p.add_argument("--lleg-media", type=float, default=24.0)
+    p.add_argument("--lleg-desv", type=float, default=23.0)
+    p.add_argument("--carga-a", type=float, default=45.0, help="Carga: min (seg)")
+    p.add_argument("--carga-b", type=float, default=55.0, help="Carga: max (seg)")
+    p.add_argument("--gom-a", type=float, default=10.0, help="Gomeria: min (min)")
+    p.add_argument("--gom-b", type=float, default=26.0, help="Gomeria: max (min)")
+    p.add_argument("--acc-a", type=float, default=1.0, help="Accesorios: min (min)")
+    p.add_argument("--acc-b", type=float, default=5.0, help="Accesorios: max (min)")
+    p.add_argument("--p-carga", type=float, default=0.80)
+    p.add_argument("--p-no-carga-acc", type=float, default=0.40)
+    p.add_argument("--p-post-carga-acc", type=float, default=0.30)
+    p.add_argument("--p-post-carga-gom", type=float, default=0.20)
 
     args = p.parse_args()
 
-    # validación básica de probabilidades
-    if not (0 <= args.p_carga <= 1
-            and 0 <= args.p_no_carga_acc <= 1
-            and 0 <= args.p_post_carga_acc <= 1
-            and 0 <= args.p_post_carga_gom <= 1
-            and args.p_post_carga_acc + args.p_post_carga_gom <= 1):
-        p.error("Las probabilidades deben estar en [0,1] y "
-                "p_post_carga_acc + p_post_carga_gom ≤ 1")
-
-    return Config(
-        n_clientes=args.clientes,
-        n_surtidores=args.surtidores,
-        n_gomerias=args.gomerias,
+    cfg = Config(
+        n_clientes=args.clientes, semilla=args.semilla,
+        n_surtidores=args.surtidores, n_gomerias=args.gomerias,
         n_accesorios=args.accesorios,
-        lleg_media=args.lleg_media,
-        lleg_desv=args.lleg_desv,
-        carga_media=args.carga_media,
-        carga_semi=args.carga_semi,
-        gom_media=args.gom_media,
-        gom_semi=args.gom_semi,
-        acc_media=args.acc_media,
-        acc_semi=args.acc_semi,
-        p_carga=args.p_carga,
-        p_no_carga_acc=args.p_no_carga_acc,
+        lleg_media=args.lleg_media, lleg_desv=args.lleg_desv,
+        carga_a=args.carga_a, carga_b=args.carga_b,
+        gom_a=args.gom_a, gom_b=args.gom_b,
+        acc_a=args.acc_a, acc_b=args.acc_b,
+        p_carga=args.p_carga, p_no_carga_acc=args.p_no_carga_acc,
         p_post_carga_acc=args.p_post_carga_acc,
         p_post_carga_gom=args.p_post_carga_gom,
-        semilla=args.semilla,
-        desde=args.desde,
-        cantidad=args.cantidad,
-    ), args.salida, args.abrir
+        desde=args.desde, cantidad=args.cantidad,
+    )
 
-
-def main():
-    cfg, salida, abrir = parse_args()
     sim = Simulacion(cfg)
     sim.ejecutar()
 
-    ruta = Path(salida).resolve()
-    a_html(sim, ruta)
-
     total = len(sim.filas)
-    inicio = max(0, cfg.desde)
-    fin = (inicio + cfg.cantidad) if cfg.cantidad is not None else total
-    fin = min(fin, total)
-
     print(f"Clientes arribados : {sim.arribados}")
     print(f"Eventos totales    : {total - 1}")
-    print(f"Filas mostradas    : {fin - inicio}  (desde {inicio} a {fin-1})")
-    print(f"Cola máx surt.     : {sim.stats.cola_max_surtidor}")
-    print(f"Cola máx gomería   : {sim.stats.cola_max_gomeria}")
-    print(f"Cola máx acces.    : {sim.stats.cola_max_accesorios}")
-    print(f"T máx en sistema   : {sim.stats.tiempo_max_sistema:.2f} s "
+    print(f"Cola max surt.     : {sim.stats.cola_max_surtidor}")
+    print(f"Cola max gomeria   : {sim.stats.cola_max_gomeria}")
+    print(f"Cola max acces.    : {sim.stats.cola_max_accesorios}")
+    print(f"T max en sistema   : {sim.stats.tiempo_max_sistema:.2f} s "
           f"({sim.stats.tiempo_max_sistema/60:.2f} min) "
           f"(cliente C{sim.stats.id_cliente_max_tiempo})")
-    print(f"Archivo HTML       : {ruta}")
-
-    if abrir:
-        webbrowser.open(ruta.as_uri())
 
 
 if __name__ == "__main__":

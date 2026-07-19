@@ -1,5 +1,5 @@
 """
-Interfaz web para la simulación de estación de servicio.
+Interfaz web para la simulacion de estacion de servicio.
 Ejecutar: python app.py
 Abrir: http://localhost:5000
 """
@@ -10,37 +10,26 @@ import html as html_mod
 
 app = Flask(__name__)
 
-# ---------------------------------------------------------------------------
-# Campos del formulario: (id, label, default, tipo, grupo, tooltip)
-# ---------------------------------------------------------------------------
 CAMPOS = [
-    # --- Simulación ---
-    ("n_clientes",   "Cantidad de clientes",      500,   "int",   "Simulación",        "Cuántos clientes se generan"),
-    ("semilla",      "Semilla (vacío = aleatoria)", "",   "oint",  "Simulación",        "Semilla del generador aleatorio"),
-    # --- Visualización ---
-    ("desde",        "Mostrar desde fila",          0,    "int",   "Visualización",     "Índice de la primera fila a mostrar"),
-    ("cantidad",     "Cant. filas a mostrar (vacío = todas)", "", "oint", "Visualización", "Cantidad de filas a mostrar"),
-    # --- Servidores ---
-    ("n_surtidores", "Surtidores",                  3,    "int",   "Servidores",        "Cantidad de surtidores de combustible"),
-    ("n_gomerias",   "Empleados de gomería",        2,    "int",   "Servidores",        "Cantidad de empleados de gomería"),
-    ("n_accesorios", "Puestos de accesorios",       1,    "int",   "Servidores",        "Cantidad de puestos de venta de accesorios"),
-    # --- Llegadas ---
-    ("lleg_media",   "Media (s)",                  24.0,  "float", "Llegadas — Normal", "Media de la distribución normal"),
-    ("lleg_desv",    "Desv. estándar (s)",         23.0,  "float", "Llegadas — Normal", "Desviación estándar"),
-    # --- Carga ---
-    ("carga_media",  "Media (s)",                  50.0,  "float", "Carga combustible — Uniforme", "Media del tiempo de carga"),
-    ("carga_semi",   "± semi-amplitud (s)",         5.0,  "float", "Carga combustible — Uniforme", "Semi-amplitud: [media-semi, media+semi]"),
-    # --- Gomería ---
-    ("gom_media",    "Media (s)",                1080.0,  "float", "Gomería — Uniforme", "Media del servicio de gomería (1080 = 18 min)"),
-    ("gom_semi",     "± semi-amplitud (s)",       480.0,  "float", "Gomería — Uniforme", "Semi-amplitud (480 = 8 min)"),
-    # --- Accesorios ---
-    ("acc_media",    "Media (s)",                 180.0,  "float", "Accesorios — Uniforme", "Media del servicio de accesorios (180 = 3 min)"),
-    ("acc_semi",     "± semi-amplitud (s)",       120.0,  "float", "Accesorios — Uniforme", "Semi-amplitud (120 = 2 min)"),
-    # --- Ruteo ---
-    ("p_carga",          "P(combustible)",          0.80, "float", "Probabilidades de ruteo", "Prob. de que un cliente vaya a cargar combustible"),
-    ("p_no_carga_acc",   "P(no-carga → accesorios)", 0.40, "float", "Probabilidades de ruteo", "Si no carga: prob. de ir a accesorios (resto → gomería)"),
-    ("p_post_carga_acc", "P(post-carga → accesorios)", 0.30, "float", "Probabilidades de ruteo", "Al terminar la carga: prob. de ir a accesorios"),
-    ("p_post_carga_gom", "P(post-carga → gomería)",    0.20, "float", "Probabilidades de ruteo", "Al terminar la carga: prob. de ir a gomería (resto → sale)"),
+    ("n_clientes",   "Cantidad de clientes",               500,   "int",   "Simulacion",        "Cuantos clientes se generan"),
+    ("semilla",      "Semilla (vacio = aleatoria)",          "",   "oint",  "Simulacion",        "Semilla del generador aleatorio"),
+    ("desde",        "Mostrar desde fila",                    0,   "int",   "Visualizacion",     "Indice de la primera fila a mostrar"),
+    ("cantidad",     "Cant. filas a mostrar (vacio = todas)","",   "oint",  "Visualizacion",     "Cantidad de filas a mostrar"),
+    ("n_surtidores", "Surtidores",                            3,   "int",   "Servidores",        "Cantidad de surtidores de combustible"),
+    ("n_gomerias",   "Empleados de gomeria",                  2,   "int",   "Servidores",        "Cantidad de empleados de gomeria"),
+    ("n_accesorios", "Puestos de accesorios",                 1,   "int",   "Servidores",        "Cantidad de puestos de venta de accesorios"),
+    ("lleg_media",   "Media (seg)",                         24.0,  "float", "Llegadas - Normal",         "Media de la distribucion normal (segundos)"),
+    ("lleg_desv",    "Desv. estandar (seg)",                23.0,  "float", "Llegadas - Normal",         "Desviacion estandar (segundos)"),
+    ("carga_a",      "A - minimo (seg)",                    45.0,  "float", "Carga combustible - Uniforme(A, B)", "Limite inferior en segundos"),
+    ("carga_b",      "B - maximo (seg)",                    55.0,  "float", "Carga combustible - Uniforme(A, B)", "Limite superior en segundos"),
+    ("gom_a",        "A - minimo (min)",                    10.0,  "float", "Gomeria - Uniforme(A, B)",  "Limite inferior en minutos"),
+    ("gom_b",        "B - maximo (min)",                    26.0,  "float", "Gomeria - Uniforme(A, B)",  "Limite superior en minutos"),
+    ("acc_a",        "A - minimo (min)",                     1.0,  "float", "Accesorios - Uniforme(A, B)", "Limite inferior en minutos"),
+    ("acc_b",        "B - maximo (min)",                     5.0,  "float", "Accesorios - Uniforme(A, B)", "Limite superior en minutos"),
+    ("p_carga",          "P(combustible)",                  0.80,  "float", "Probabilidades de ruteo", "Prob. de que un cliente vaya a cargar combustible"),
+    ("p_no_carga_acc",   "P(no-carga -> accesorios)",       0.40,  "float", "Probabilidades de ruteo", "Si no carga: prob. de ir a accesorios (resto -> gomeria)"),
+    ("p_post_carga_acc", "P(post-carga -> accesorios)",     0.30,  "float", "Probabilidades de ruteo", "Al terminar la carga: prob. de ir a accesorios"),
+    ("p_post_carga_gom", "P(post-carga -> gomeria)",        0.20,  "float", "Probabilidades de ruteo", "Al terminar la carga: prob. de ir a gomeria (resto -> sale)"),
 ]
 
 
@@ -57,13 +46,10 @@ def _val(form, field_id, tipo, default):
     return raw
 
 
-# ---------------------------------------------------------------------------
-# Template HTML
-# ---------------------------------------------------------------------------
 TEMPLATE = r"""<!DOCTYPE html>
 <html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Simulación — Estación de Servicio</title>
+<title>Simulacion - Estacion de Servicio</title>
 <style>
 :root { color-scheme: light dark; --bg: #f5f6fa; --card: #fff; --border: #ddd;
         --text: #111; --text2: #555; --accent: #1976d2; --accent2: #ef6c00; }
@@ -80,8 +66,7 @@ header p  { margin: 4px 0 0; font-size: 13px; opacity: .7; }
 
 .layout { display: flex; min-height: calc(100vh - 70px); }
 
-/* ---- panel izquierdo: form ---- */
-.panel { width: 340px; min-width: 280px; background: var(--card);
+.panel { width: 380px; min-width: 300px; background: var(--card);
          border-right: 1px solid var(--border); padding: 16px;
          overflow-y: auto; max-height: calc(100vh - 70px); }
 .grupo-titulo {
@@ -105,7 +90,6 @@ button[type=submit] { background: var(--accent); color: #fff; }
 button[type=submit]:hover { filter: brightness(1.15); }
 button[type=reset] { background: var(--border); color: var(--text); }
 
-/* ---- panel derecho: resultados ---- */
 .resultados { flex: 1; padding: 16px; overflow: auto; max-height: calc(100vh - 70px); }
 .cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .card {
@@ -115,7 +99,6 @@ button[type=reset] { background: var(--border); color: var(--text); }
 }
 .card h3 { margin: 0 0 6px; font-size: 13px; color: var(--accent); text-transform: uppercase; letter-spacing: .3px; }
 .card div { font-size: 13px; margin: 2px 0; }
-.card b { color: var(--text); }
 
 .tabla-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; }
 table { border-collapse: collapse; font-size: 12px; white-space: nowrap; width: max-content; }
@@ -141,21 +124,16 @@ td.cli    { text-align: left; font-family: ui-monospace, Consolas, monospace; fo
 
 .empty { text-align: center; padding: 80px 20px; color: var(--text2); }
 .empty h2 { margin: 0 0 8px; font-size: 18px; }
-
-.spinner { display: none; }
-form.loading .spinner { display: inline-block; }
-form.loading button[type=submit] span { display: none; }
 </style>
 </head><body>
 
 <header>
-    <h1>Simulación — Estación de Servicio</h1>
-    <p>UTN FRC · Materia Simulación · Todos los parámetros son configurables</p>
+    <h1>Simulacion - Estacion de Servicio</h1>
+    <p>UTN FRC - Materia Simulacion - Todos los parametros son configurables</p>
 </header>
 
 <div class="layout">
-<!-- ========= PANEL: FORMULARIO ========= -->
-<form class="panel" method="POST" action="/" onsubmit="this.classList.add('loading')">
+<form class="panel" method="POST" action="/">
 {% set ns = namespace(current_group=None) %}
 {% for id, label, default, tipo, grupo, tooltip in campos %}
     {% if grupo != ns.current_group %}
@@ -169,57 +147,54 @@ form.loading button[type=submit] span { display: none; }
                {% if tipo in ('int','oint') %}step="1"{% endif %}
                {% if tipo == 'float' %}inputmode="decimal"{% endif %}
                value="{{ valores.get(id, default) }}"
-               {% if tipo == 'oint' %}placeholder="—"{% endif %}
+               {% if tipo == 'oint' %}placeholder="---"{% endif %}
         >
     </div>
 {% endfor %}
 
     <div class="btn-row">
-        <button type="submit"><span>Simular</span><span class="spinner">⏳</span></button>
+        <button type="submit">Simular</button>
         <button type="reset">Reset</button>
     </div>
 </form>
 
-<!-- ========= RESULTADOS ========= -->
 <div class="resultados">
 {% if not resultado %}
     <div class="empty">
-        <h2>Configurá los parámetros y hacé clic en Simular</h2>
+        <h2>Configura los parametros y hace clic en Simular</h2>
         <p>Los valores por defecto corresponden al enunciado original del TP.</p>
     </div>
 {% else %}
-    <!-- cards resumen -->
     <div class="cards">
         <div class="card">
-            <h3>Simulación</h3>
+            <h3>Simulacion</h3>
             <div><b>Clientes arribados:</b> {{ resultado.arribados }}</div>
             <div><b>Eventos totales:</b> {{ resultado.total_eventos }}</div>
             <div><b>Filas mostradas:</b> {{ resultado.filas_mostradas }}
-                 ({{ resultado.desde }}–{{ resultado.hasta }})</div>
+                 ({{ resultado.desde }}-{{ resultado.hasta }})</div>
             <div><b>Semilla:</b> {{ resultado.semilla }}</div>
         </div>
         <div class="card">
-            <h3>Colas máximas</h3>
+            <h3>Colas maximas</h3>
             <div><b>Surtidores:</b> {{ resultado.cola_max_surt }}</div>
-            <div><b>Gomería:</b> {{ resultado.cola_max_gom }}</div>
+            <div><b>Gomeria:</b> {{ resultado.cola_max_gom }}</div>
             <div><b>Accesorios:</b> {{ resultado.cola_max_acc }}</div>
         </div>
         <div class="card">
-            <h3>Tiempo máximo en sistema</h3>
+            <h3>Tiempo maximo en sistema</h3>
             <div><b>{{ resultado.t_max_s }}</b> s = <b>{{ resultado.t_max_m }}</b> min</div>
             <div>Cliente <b>C{{ resultado.t_max_cliente }}</b></div>
         </div>
         <div class="card">
-            <h3>Parámetros usados</h3>
-            <div><b>Llegadas:</b> Normal(μ={{ resultado.lleg_media }}, σ={{ resultado.lleg_desv }})</div>
-            <div><b>Carga:</b> U({{ resultado.carga_media }}±{{ resultado.carga_semi }}) s</div>
-            <div><b>Gomería:</b> U({{ resultado.gom_media }}±{{ resultado.gom_semi }}) s</div>
-            <div><b>Accesorios:</b> U({{ resultado.acc_media }}±{{ resultado.acc_semi }}) s</div>
-            <div><b>Servidores:</b> {{ resultado.n_surt }} surt · {{ resultado.n_gom }} gom · {{ resultado.n_acc }} acc</div>
+            <h3>Parametros usados</h3>
+            <div><b>Llegadas:</b> Normal(media={{ resultado.lleg_media }}s, desv={{ resultado.lleg_desv }}s)</div>
+            <div><b>Carga:</b> U({{ resultado.carga_a }}, {{ resultado.carga_b }}) seg</div>
+            <div><b>Gomeria:</b> U({{ resultado.gom_a }}, {{ resultado.gom_b }}) min</div>
+            <div><b>Accesorios:</b> U({{ resultado.acc_a }}, {{ resultado.acc_b }}) min</div>
+            <div><b>Servidores:</b> {{ resultado.n_surt }} surt - {{ resultado.n_gom }} gom - {{ resultado.n_acc }} acc</div>
         </div>
     </div>
 
-    <!-- tabla -->
     <div class="tabla-wrap">
     <table>
         <thead>
@@ -238,9 +213,6 @@ form.loading button[type=submit] span { display: none; }
 </body></html>"""
 
 
-# ---------------------------------------------------------------------------
-# Construcción de tabla HTML (reutiliza lógica de estacion_servicio)
-# ---------------------------------------------------------------------------
 def build_tabla(sim: Simulacion, desde: int, cantidad):
     cfg = sim.cfg
 
@@ -255,20 +227,20 @@ def build_tabla(sim: Simulacion, desde: int, cantidad):
 
     grupos = [
         ("evt", "Evento", ["N", "Evento", "Reloj (s)"]),
-        ("lleg", "Próxima llegada",
-            ["RND1 lleg.", "RND2 lleg.", "Δ llegada (s)", "Próx. llegada"]),
+        ("lleg", "Proxima llegada",
+            ["RND1 lleg.", "RND2 lleg.", "T entre lleg. (s)", "Prox. llegada"]),
         ("ruta", "Ruteo cliente",
             ["RND tipo", "RND subruta", "RND post-carga"]),
         ("srv-carga", "Servicio: carga", ["RND carga", "T carga (s)"]),
-        ("srv-gom", "Servicio: gomería", ["RND gomería", "T gomería (s)"]),
+        ("srv-gom", "Servicio: gomeria", ["RND gomeria", "T gomeria (s)"]),
         ("srv-acc", "Servicio: accesorios", ["RND acces.", "T acces. (s)"]),
         ("servs", "Estado servidores",
             nombres_surt + nombres_gom + nombres_acc),
         ("colas", "Longitud colas",
             ["Cola surt.", "Cola gom.", "Cola acces."]),
-        ("stats", "Estadísticas máximas",
-            ["Máx cola surt.", "Máx cola gom.", "Máx cola acces.",
-             "Máx T sistema (s)"]),
+        ("stats", "Estadisticas maximas",
+            ["Max cola surt.", "Max cola gom.", "Max cola acces.",
+             "Max T sistema (s)"]),
     ]
 
     dinam = set()
@@ -325,21 +297,18 @@ def build_tabla(sim: Simulacion, desde: int, cantidad):
         "t_max_cliente": sim.stats.id_cliente_max_tiempo,
         "lleg_media": cfg.lleg_media,
         "lleg_desv": cfg.lleg_desv,
-        "carga_media": cfg.carga_media,
-        "carga_semi": cfg.carga_semi,
-        "gom_media": cfg.gom_media,
-        "gom_semi": cfg.gom_semi,
-        "acc_media": cfg.acc_media,
-        "acc_semi": cfg.acc_semi,
+        "carga_a": cfg.carga_a,
+        "carga_b": cfg.carga_b,
+        "gom_a": cfg.gom_a,
+        "gom_b": cfg.gom_b,
+        "acc_a": cfg.acc_a,
+        "acc_b": cfg.acc_b,
         "n_surt": cfg.n_surtidores,
         "n_gom": cfg.n_gomerias,
         "n_acc": cfg.n_accesorios,
     }
 
 
-# ---------------------------------------------------------------------------
-# Rutas
-# ---------------------------------------------------------------------------
 @app.route("/", methods=["GET", "POST"])
 def index():
     resultado = None
@@ -359,12 +328,12 @@ def index():
             n_accesorios=_val(f, "n_accesorios", "int", 1),
             lleg_media=_val(f, "lleg_media", "float", 24.0),
             lleg_desv=_val(f, "lleg_desv", "float", 23.0),
-            carga_media=_val(f, "carga_media", "float", 50.0),
-            carga_semi=_val(f, "carga_semi", "float", 5.0),
-            gom_media=_val(f, "gom_media", "float", 1080.0),
-            gom_semi=_val(f, "gom_semi", "float", 480.0),
-            acc_media=_val(f, "acc_media", "float", 180.0),
-            acc_semi=_val(f, "acc_semi", "float", 120.0),
+            carga_a=_val(f, "carga_a", "float", 45.0),
+            carga_b=_val(f, "carga_b", "float", 55.0),
+            gom_a=_val(f, "gom_a", "float", 10.0),
+            gom_b=_val(f, "gom_b", "float", 26.0),
+            acc_a=_val(f, "acc_a", "float", 1.0),
+            acc_b=_val(f, "acc_b", "float", 5.0),
             p_carga=_val(f, "p_carga", "float", 0.80),
             p_no_carga_acc=_val(f, "p_no_carga_acc", "float", 0.40),
             p_post_carga_acc=_val(f, "p_post_carga_acc", "float", 0.30),
