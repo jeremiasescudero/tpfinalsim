@@ -90,9 +90,9 @@ button[type=submit] { background: var(--accent); color: #fff; }
 button[type=submit]:hover { filter: brightness(1.15); }
 button[type=reset] { background: var(--border); color: var(--text); }
 
-.resultados { flex: 1; padding: 16px; overflow-y: auto; overflow-x: hidden;
-             max-height: calc(100vh - 70px); }
-.cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.resultados { flex: 1; padding: 16px; display: flex; flex-direction: column;
+             max-height: calc(100vh - 70px); overflow: hidden; }
+.cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; flex-shrink: 0; }
 .card {
     background: var(--card); border: 1px solid var(--border);
     border-radius: 8px; padding: 12px 16px; min-width: 200px;
@@ -102,21 +102,22 @@ button[type=reset] { background: var(--border); color: var(--text); }
 .card div { font-size: 13px; margin: 2px 0; }
 
 .tabla-wrap {
-    overflow-x: auto; overflow-y: visible;
+    flex: 1; overflow: auto;
     border: 1px solid var(--border); border-radius: 6px;
     cursor: grab; user-select: none;
+    min-height: 0;
 }
 .tabla-wrap.grabbing { cursor: grabbing; }
-.tabla-wrap::-webkit-scrollbar { height: 8px; }
+.tabla-wrap::-webkit-scrollbar { width: 8px; height: 8px; }
 .tabla-wrap::-webkit-scrollbar-track { background: var(--bg); }
 .tabla-wrap::-webkit-scrollbar-thumb { background: #888; border-radius: 4px; }
 
-table { border-collapse: collapse; font-size: 12px; white-space: nowrap; width: max-content; }
+table { border-collapse: separate; border-spacing: 0; font-size: 12px; white-space: nowrap; width: max-content; }
 th, td { padding: 4px 8px; text-align: right; border-right: 1px solid var(--border);
          border-bottom: 1px solid var(--border); }
-thead th { position: sticky; top: 0; z-index: 2; font-weight: 600; }
+thead th { position: sticky; z-index: 3; font-weight: 600; }
 thead tr:first-child th { top: 0; }
-thead tr:nth-child(2) th { top: 25px; }
+thead tr:nth-child(2) th { top: 26px; }
 tbody tr:nth-child(even) { background: rgba(128,128,128,.06); }
 tbody tr:hover { background: rgba(25,118,210,.08); }
 
@@ -134,7 +135,8 @@ th.cli       { background: #5d4037; color: #fff; }
 td.evento { text-align: left; font-weight: 600; }
 td.cli    { text-align: left; font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
 
-.empty { text-align: center; padding: 80px 20px; color: var(--text2); }
+.empty { text-align: center; padding: 80px 20px; color: var(--text2); flex: 1;
+         display: flex; flex-direction: column; justify-content: center; align-items: center; }
 .empty h2 { margin: 0 0 8px; font-size: 18px; }
 </style>
 </head><body>
