@@ -90,7 +90,8 @@ button[type=submit] { background: var(--accent); color: #fff; }
 button[type=submit]:hover { filter: brightness(1.15); }
 button[type=reset] { background: var(--border); color: var(--text); }
 
-.resultados { flex: 1; padding: 16px; overflow: auto; max-height: calc(100vh - 70px); }
+.resultados { flex: 1; padding: 16px; overflow-y: auto; overflow-x: hidden;
+             max-height: calc(100vh - 70px); }
 .cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .card {
     background: var(--card); border: 1px solid var(--border);
@@ -100,11 +101,22 @@ button[type=reset] { background: var(--border); color: var(--text); }
 .card h3 { margin: 0 0 6px; font-size: 13px; color: var(--accent); text-transform: uppercase; letter-spacing: .3px; }
 .card div { font-size: 13px; margin: 2px 0; }
 
-.tabla-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; }
+.tabla-wrap {
+    overflow-x: auto; overflow-y: visible;
+    border: 1px solid var(--border); border-radius: 6px;
+    cursor: grab; user-select: none;
+}
+.tabla-wrap.grabbing { cursor: grabbing; }
+.tabla-wrap::-webkit-scrollbar { height: 8px; }
+.tabla-wrap::-webkit-scrollbar-track { background: var(--bg); }
+.tabla-wrap::-webkit-scrollbar-thumb { background: #888; border-radius: 4px; }
+
 table { border-collapse: collapse; font-size: 12px; white-space: nowrap; width: max-content; }
 th, td { padding: 4px 8px; text-align: right; border-right: 1px solid var(--border);
          border-bottom: 1px solid var(--border); }
-th { position: sticky; top: 0; z-index: 2; font-weight: 600; }
+thead th { position: sticky; top: 0; z-index: 2; font-weight: 600; }
+thead tr:first-child th { top: 0; }
+thead tr:nth-child(2) th { top: 25px; }
 tbody tr:nth-child(even) { background: rgba(128,128,128,.06); }
 tbody tr:hover { background: rgba(25,118,210,.08); }
 
@@ -210,6 +222,24 @@ td.cli    { text-align: left; font-family: ui-monospace, Consolas, monospace; fo
 </div>
 </div>
 
+<script>
+document.querySelectorAll('.tabla-wrap').forEach(function(el) {
+    var startX, scrollLeft, down = false;
+    el.addEventListener('mousedown', function(e) {
+        down = true;
+        el.classList.add('grabbing');
+        startX = e.pageX - el.offsetLeft;
+        scrollLeft = el.scrollLeft;
+    });
+    el.addEventListener('mouseleave', function() { down = false; el.classList.remove('grabbing'); });
+    el.addEventListener('mouseup', function() { down = false; el.classList.remove('grabbing'); });
+    el.addEventListener('mousemove', function(e) {
+        if (!down) return;
+        e.preventDefault();
+        el.scrollLeft = scrollLeft - (e.pageX - el.offsetLeft - startX);
+    });
+});
+</script>
 </body></html>"""
 
 
