@@ -130,6 +130,8 @@ class Simulacion:
 
         # valores del evento actual para la fila
         self._ev: dict = {}
+        # cliente al que corresponde el evento actual (para la etiqueta)
+        self._cli_evento: Optional[int] = None
 
     def _debe_registrar(self, idx: int) -> bool:
         return self._rec_ini <= idx < self._rec_fin
@@ -237,6 +239,7 @@ class Simulacion:
         self.prox_id += 1
         self.arribados += 1
         self.clientes[c.id] = c
+        self._cli_evento = c.id
 
         # ruteo con un solo RND y probabilidades acumuladas
         r = rnd()
@@ -278,6 +281,7 @@ class Simulacion:
 
     def _fin_carga(self, servidor: Servidor):
         cliente = servidor.cliente
+        self._cli_evento = cliente.id
         servidor.ocupado = False
         servidor.cliente = None
         servidor.fin = float("inf")
@@ -287,6 +291,7 @@ class Simulacion:
 
     def _fin_gomeria(self, servidor: Servidor):
         cliente = servidor.cliente
+        self._cli_evento = cliente.id
         servidor.ocupado = False
         servidor.cliente = None
         servidor.fin = float("inf")
@@ -296,6 +301,7 @@ class Simulacion:
 
     def _fin_accesorios(self, servidor: Servidor):
         cliente = servidor.cliente
+        self._cli_evento = cliente.id
         servidor.ocupado = False
         servidor.cliente = None
         servidor.fin = float("inf")
@@ -374,9 +380,12 @@ class Simulacion:
 
     def _registrar_fila(self, evento: str):
         ev = self._ev
+        etiqueta = evento
+        if self._cli_evento is not None and evento != "Inicializacion":
+            etiqueta = f"{evento} (C{self._cli_evento})"
         fila = {
             "N": self.n_evento,
-            "Evento": evento,
+            "Evento": etiqueta,
             "Reloj": round(self.reloj, 2),
         }
 
