@@ -39,6 +39,11 @@ class Config:
     semilla: Optional[int] = None
     desde: int = 0
     cantidad: Optional[int] = None
+    n_iteraciones: Optional[int] = None
+
+    # Limites de rendimiento (para corridas grandes, ej. 100.000 iteraciones)
+    max_filas: int = 1000          # tope de filas a registrar si cantidad es None
+    max_clientes_detalle: int = 50  # tope de clientes con columnas por fila
 
 
 def rnd() -> float:
@@ -115,8 +120,19 @@ class Simulacion:
         self.stats = Estadisticas()
         self.filas: list[dict] = []
 
+        # ventana de registro: solo se materializan como fila los eventos
+        # cuyo indice cae en [rec_ini, rec_fin). El resto se simula igual
+        # (las estadisticas se acumulan) pero no se guarda en memoria.
+        self._rec_ini = max(0, cfg.desde)
+        cant = cfg.cantidad if cfg.cantidad is not None else cfg.max_filas
+        self._rec_fin = self._rec_ini + max(0, cant)
+        self.truncado = False  # True si hubo mas eventos que los registrados
+
         # valores del evento actual para la fila
         self._ev: dict = {}
+
+    def _debe_registrar(self, idx: int) -> bool:
+        return self._rec_ini <= idx < self._rec_fin
 
     def _limpiar_ev(self):
         self._ev = {}
@@ -313,8 +329,12 @@ class Simulacion:
     def ejecutar(self):
         self._limpiar_ev()
         self._programar_prox_llegada()
-        self._registrar_fila("Inicializacion")
+        if self._debe_registrar(0):
+            self._registrar_fila("Inicializacion")
         self._limpiar_ev()
+
+        ultimo_nombre = "Inicializacion"
+        ultimo_registrado = self._debe_registrar(0)
 
         while True:
             nombre, t, servidor = self._proximo_evento()
@@ -333,8 +353,24 @@ class Simulacion:
                 self._fin_accesorios(servidor)
 
             self._actualizar_maximos()
-            self._registrar_fila(nombre)
+            ultimo_nombre = nombre
+
+            # solo se materializa la fila si cae en la ventana de registro
+            if self._debe_registrar(self.n_evento):
+                self._registrar_fila(nombre)
+                ultimo_registrado = True
+            else:
+                ultimo_registrado = False
+                self.truncado = True
             self._limpiar_ev()
+
+            if (self.cfg.n_iteraciones is not None
+                    and self.n_evento >= self.cfg.n_iteraciones):
+                break
+
+        # se garantiza siempre la fila de estado final de la corrida
+        if not ultimo_registrado and self.n_evento > 0:
+            self._registrar_fila(ultimo_nombre)
 
     def _registrar_fila(self, evento: str):
         ev = self._ev
@@ -394,8 +430,11 @@ class Simulacion:
         fila["Max cola acces."] = self.stats.cola_max_accesorios
         fila["Max T sist. (s)"] = round(self.stats.tiempo_max_sistema, 2)
 
-        # objetos temporales: 5 sub-columnas por cliente
-        for cid in sorted(self.clientes.keys()):
+        # objetos temporales: 5 sub-columnas por cliente.
+        # Se acota a max_clientes_detalle para que una cola enorme no genere
+        # filas con decenas de miles de columnas (corridas de 100.000 iter.).
+        ids = sorted(self.clientes.keys())[:self.cfg.max_clientes_detalle]
+        for cid in ids:
             c = self.clientes[cid]
             prefix = f"C{cid}"
             fila[f"{prefix}_estado"] = c.estado
@@ -428,6 +467,8 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("-n", "--clientes", type=int, default=500)
+    p.add_argument("-i", "--iteraciones", type=int, default=None,
+                   help="Cortar la simulacion tras N iteraciones (eventos)")
     p.add_argument("-s", "--semilla", type=int, default=None)
     p.add_argument("--desde", type=int, default=0)
     p.add_argument("--cantidad", type=int, default=None)
@@ -460,11 +501,13 @@ def main():
         p_post_carga_acc=args.p_post_carga_acc,
         p_post_carga_gom=args.p_post_carga_gom,
         desde=args.desde, cantidad=args.cantidad,
+        n_iteraciones=args.iteraciones,
     )
     sim = Simulacion(cfg)
     sim.ejecutar()
     print(f"Clientes arribados : {sim.arribados}")
-    print(f"Eventos totales    : {len(sim.filas) - 1}")
+    print(f"Eventos totales    : {sim.n_evento}")
+    print(f"Filas registradas  : {len(sim.filas)}")
     print(f"Cola max surt.     : {sim.stats.cola_max_surtidor}")
     print(f"Cola max gomeria   : {sim.stats.cola_max_gomeria}")
     print(f"Cola max acces.    : {sim.stats.cola_max_accesorios}")
