@@ -2,26 +2,15 @@
 Simulacion - Estacion de Servicio
 UTN FRC - Materia Simulacion
 
-Distribuciones por defecto:
-  - Llegadas:              Normal(media=24", desv=23")
-  - Carga de combustible:  Uniforme(45", 55")           -> 50" +/- 5"
-  - Gomeria:               Uniforme(10', 26')            -> 18' +/- 8'
-  - Accesorios:            Uniforme(1', 5')              ->  3' +/- 2'
-
-Ruteo por defecto:
-  80% carga combustible -> de esos: 30% acc, 20% gom, 50% sale.
-  20% no carga -> 40% acc, 60% gom.
+Vector de estado segun modelo de colas planteado en el TP.
 """
 
 from __future__ import annotations
 
 import argparse
-import html
 import math
 import random
-import webbrowser
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional
 
 
@@ -35,13 +24,12 @@ class Config:
     lleg_media: float = 24.0
     lleg_desv: float = 23.0
 
-    # uniformes: A y B directos, internamente en minutos
-    carga_a: float = 45.0       # segundos
-    carga_b: float = 55.0       # segundos
-    gom_a: float = 10.0         # minutos
-    gom_b: float = 26.0         # minutos
-    acc_a: float = 1.0          # minutos
-    acc_b: float = 5.0          # minutos
+    carga_a: float = 45.0
+    carga_b: float = 55.0
+    gom_a: float = 10.0
+    gom_b: float = 26.0
+    acc_a: float = 1.0
+    acc_b: float = 5.0
 
     p_carga: float = 0.80
     p_no_carga_acc: float = 0.40
@@ -73,9 +61,12 @@ def rnd_normal(media: float, desv: float) -> tuple[float, float, float]:
 class Cliente:
     id: int
     llegada: float
-    estado: str = "En espera"
+    estado: str = ""
+    tipo: str = ""
+    inicio_espera: Optional[float] = None
+    fin_atencion: Optional[float] = None
     salida: Optional[float] = None
-    ruta: str = ""
+    cargo_comb: bool = False
 
 
 @dataclass
@@ -105,9 +96,6 @@ class Simulacion:
         self.n_evento = 0
 
         self.prox_llegada = 0.0
-        self.rnd_lleg1: Optional[float] = None
-        self.rnd_lleg2: Optional[float] = None
-        self.t_lleg: Optional[float] = None
 
         self.surtidores = [Servidor(f"Surtidor {i+1}")
                            for i in range(cfg.n_surtidores)]
@@ -124,33 +112,26 @@ class Simulacion:
         self.clientes: dict[int, Cliente] = {}
         self.prox_id = 1
         self.arribados = 0
-
         self.stats = Estadisticas()
-
-        self.ult_rnd_carga: Optional[float] = None
-        self.ult_t_carga: Optional[float] = None
-        self.ult_rnd_gom: Optional[float] = None
-        self.ult_t_gom: Optional[float] = None
-        self.ult_rnd_acc: Optional[float] = None
-        self.ult_t_acc: Optional[float] = None
-
-        self.ult_rnd_tipo: Optional[float] = None
-        self.ult_rnd_sub: Optional[float] = None
-        self.ult_rnd_post: Optional[float] = None
-
         self.filas: list[dict] = []
+
+        # valores del evento actual para la fila
+        self._ev: dict = {}
+
+    def _limpiar_ev(self):
+        self._ev = {}
 
     def _programar_prox_llegada(self):
         if self.arribados >= self.cfg.n_clientes:
             self.prox_llegada = float("inf")
-            self.rnd_lleg1 = self.rnd_lleg2 = self.t_lleg = None
             return
         r1, r2, t = rnd_normal(self.cfg.lleg_media, self.cfg.lleg_desv)
         t = max(0.1, t)
-        self.rnd_lleg1 = r1
-        self.rnd_lleg2 = r2
-        self.t_lleg = t
+        self._ev["RND1 lleg."] = r1
+        self._ev["RND2 lleg."] = r2
+        self._ev["T entre lleg. (s)"] = t
         self.prox_llegada = self.reloj + t
+        self._ev["Prox. llegada"] = round(self.prox_llegada, 2)
 
     def _libre(self, servidores: list[Servidor]) -> Optional[Servidor]:
         for s in servidores:
@@ -158,55 +139,77 @@ class Simulacion:
                 return s
         return None
 
-    def _asignar(self, servidor: Servidor, cliente: Cliente,
-                 rnd_val: float, dur: float, etiqueta_estado: str,
-                 slot_rnd: str, slot_t: str):
-        servidor.ocupado = True
-        servidor.cliente = cliente
-        servidor.fin = self.reloj + dur
-        cliente.estado = f"{etiqueta_estado} ({servidor.nombre})"
-        setattr(self, slot_rnd, rnd_val)
-        setattr(self, slot_t, dur)
-
-    def _iniciar_carga(self, cliente: Cliente):
+    def _asignar_carga(self, cliente: Cliente):
         s = self._libre(self.surtidores)
         if s is None:
             self.cola_surtidor.append(cliente)
             cliente.estado = "En cola surtidor"
+            cliente.tipo = "Carga comb."
+            cliente.inicio_espera = self.reloj
+            cliente.fin_atencion = None
         else:
             r, dur = rnd_uniforme(self.cfg.carga_a, self.cfg.carga_b)
-            self._asignar(s, cliente, r, dur, "Cargando comb.",
-                          "ult_rnd_carga", "ult_t_carga")
+            s.ocupado = True
+            s.cliente = cliente
+            s.fin = self.reloj + dur
+            cliente.estado = f"Siendo atendido ({s.nombre})"
+            cliente.tipo = "Carga comb."
+            cliente.inicio_espera = None
+            cliente.fin_atencion = s.fin
+            self._ev["RND carga"] = r
+            self._ev["T carga (s)"] = dur
+            self._ev["Fin carga"] = round(s.fin, 2)
 
-    def _iniciar_gomeria(self, cliente: Cliente):
+    def _asignar_gomeria(self, cliente: Cliente):
         s = self._libre(self.gomerias)
+        a_seg = self.cfg.gom_a * 60
+        b_seg = self.cfg.gom_b * 60
         if s is None:
             self.cola_gomeria.append(cliente)
             cliente.estado = "En cola gomeria"
+            cliente.tipo = "Gomeria"
+            cliente.inicio_espera = self.reloj
+            cliente.fin_atencion = None
         else:
-            # A y B en minutos -> convertir a segundos
-            a_seg = self.cfg.gom_a * 60
-            b_seg = self.cfg.gom_b * 60
             r, dur = rnd_uniforme(a_seg, b_seg)
-            self._asignar(s, cliente, r, dur, "En gomeria",
-                          "ult_rnd_gom", "ult_t_gom")
+            s.ocupado = True
+            s.cliente = cliente
+            s.fin = self.reloj + dur
+            cliente.estado = f"Siendo atendido ({s.nombre})"
+            cliente.tipo = "Gomeria"
+            cliente.inicio_espera = None
+            cliente.fin_atencion = s.fin
+            self._ev["RND gomeria"] = r
+            self._ev["T gomeria (s)"] = dur
+            self._ev["Fin gomeria"] = round(s.fin, 2)
 
-    def _iniciar_accesorios(self, cliente: Cliente):
+    def _asignar_accesorios(self, cliente: Cliente):
         s = self._libre(self.accesorios_list)
+        a_seg = self.cfg.acc_a * 60
+        b_seg = self.cfg.acc_b * 60
         if s is None:
             self.cola_accesorios.append(cliente)
             cliente.estado = "En cola accesorios"
+            cliente.tipo = "Accesorios"
+            cliente.inicio_espera = self.reloj
+            cliente.fin_atencion = None
         else:
-            # A y B en minutos -> convertir a segundos
-            a_seg = self.cfg.acc_a * 60
-            b_seg = self.cfg.acc_b * 60
             r, dur = rnd_uniforme(a_seg, b_seg)
-            self._asignar(s, cliente, r, dur, "Accesorios",
-                          "ult_rnd_acc", "ult_t_acc")
+            s.ocupado = True
+            s.cliente = cliente
+            s.fin = self.reloj + dur
+            cliente.estado = f"Siendo atendido ({s.nombre})"
+            cliente.tipo = "Accesorios"
+            cliente.inicio_espera = None
+            cliente.fin_atencion = s.fin
+            self._ev["RND acces."] = r
+            self._ev["T acces. (s)"] = dur
+            self._ev["Fin acces."] = round(s.fin, 2)
 
     def _salida_cliente(self, cliente: Cliente):
         cliente.salida = self.reloj
         cliente.estado = "Finalizado"
+        cliente.fin_atencion = None
         t_sist = cliente.salida - cliente.llegada
         if t_sist > self.stats.tiempo_max_sistema:
             self.stats.tiempo_max_sistema = t_sist
@@ -219,60 +222,70 @@ class Simulacion:
         self.arribados += 1
         self.clientes[c.id] = c
 
-        r_tipo = rnd()
-        self.ult_rnd_tipo = r_tipo
-        if r_tipo < self.cfg.p_carga:
-            c.ruta = "combustible"
-            self._iniciar_carga(c)
-            self.ult_rnd_sub = None
+        # ruteo con un solo RND y probabilidades acumuladas
+        r = rnd()
+        self._ev["RND servicio"] = r
+        p_acc = self.cfg.p_carga + (1 - self.cfg.p_carga) * self.cfg.p_no_carga_acc
+
+        if r < self.cfg.p_carga:
+            self._ev["Tipo servicio"] = "Carga comb."
+            self._ev["Cargo comb?"] = "Si"
+            c.cargo_comb = True
+            self._asignar_carga(c)
+        elif r < p_acc:
+            self._ev["Tipo servicio"] = "Compra acc."
+            self._ev["Cargo comb?"] = "No"
+            c.cargo_comb = False
+            self._asignar_accesorios(c)
         else:
-            r_sub = rnd()
-            self.ult_rnd_sub = r_sub
-            if r_sub < self.cfg.p_no_carga_acc:
-                c.ruta = "solo accesorios"
-                self._iniciar_accesorios(c)
-            else:
-                c.ruta = "solo gomeria"
-                self._iniciar_gomeria(c)
+            self._ev["Tipo servicio"] = "Gomeria"
+            self._ev["Cargo comb?"] = "No"
+            c.cargo_comb = False
+            self._asignar_gomeria(c)
 
         self._programar_prox_llegada()
 
-    def _finalizar_servicio(self, servidor: Servidor, proximo_paso):
+    def _post_carga(self, cliente: Cliente):
+        r = rnd()
+        self._ev["RND post"] = r
+        acc_hasta = self.cfg.p_post_carga_acc
+        gom_hasta = acc_hasta + self.cfg.p_post_carga_gom
+        if r < acc_hasta:
+            self._ev["Que hace luego"] = "Compra acc."
+            self._asignar_accesorios(cliente)
+        elif r < gom_hasta:
+            self._ev["Que hace luego"] = "Gomeria"
+            self._asignar_gomeria(cliente)
+        else:
+            self._ev["Que hace luego"] = "Se retira"
+            self._salida_cliente(cliente)
+
+    def _fin_carga(self, servidor: Servidor):
         cliente = servidor.cliente
         servidor.ocupado = False
         servidor.cliente = None
         servidor.fin = float("inf")
-        proximo_paso(cliente)
-
-    def _post_carga(self, cliente: Cliente):
-        r = rnd()
-        self.ult_rnd_post = r
-        acc_hasta = self.cfg.p_post_carga_acc
-        gom_hasta = acc_hasta + self.cfg.p_post_carga_gom
-        if r < acc_hasta:
-            cliente.ruta += " -> accesorios"
-            self._iniciar_accesorios(cliente)
-        elif r < gom_hasta:
-            cliente.ruta += " -> gomeria"
-            self._iniciar_gomeria(cliente)
-        else:
-            cliente.ruta += " -> salida"
-            self._salida_cliente(cliente)
-
-    def _fin_carga(self, servidor: Servidor):
-        self._finalizar_servicio(servidor, self._post_carga)
+        self._post_carga(cliente)
         if self.cola_surtidor:
-            self._iniciar_carga(self.cola_surtidor.pop(0))
+            self._asignar_carga(self.cola_surtidor.pop(0))
 
     def _fin_gomeria(self, servidor: Servidor):
-        self._finalizar_servicio(servidor, self._salida_cliente)
+        cliente = servidor.cliente
+        servidor.ocupado = False
+        servidor.cliente = None
+        servidor.fin = float("inf")
+        self._salida_cliente(cliente)
         if self.cola_gomeria:
-            self._iniciar_gomeria(self.cola_gomeria.pop(0))
+            self._asignar_gomeria(self.cola_gomeria.pop(0))
 
     def _fin_accesorios(self, servidor: Servidor):
-        self._finalizar_servicio(servidor, self._salida_cliente)
+        cliente = servidor.cliente
+        servidor.ocupado = False
+        servidor.cliente = None
+        servidor.fin = float("inf")
+        self._salida_cliente(cliente)
         if self.cola_accesorios:
-            self._iniciar_accesorios(self.cola_accesorios.pop(0))
+            self._asignar_accesorios(self.cola_accesorios.pop(0))
 
     def _actualizar_maximos(self):
         self.stats.cola_max_surtidor = max(
@@ -297,24 +310,11 @@ class Simulacion:
                 candidatos.append((f"Fin {s.nombre}", s.fin, s))
         return min(candidatos, key=lambda x: x[1])
 
-    def _limpiar_valores_evento(self):
-        self.ult_rnd_carga = None
-        self.ult_t_carga = None
-        self.ult_rnd_gom = None
-        self.ult_t_gom = None
-        self.ult_rnd_acc = None
-        self.ult_t_acc = None
-        self.ult_rnd_tipo = None
-        self.ult_rnd_sub = None
-        self.ult_rnd_post = None
-        self.rnd_lleg1 = None
-        self.rnd_lleg2 = None
-        self.t_lleg = None
-
     def ejecutar(self):
+        self._limpiar_ev()
         self._programar_prox_llegada()
         self._registrar_fila("Inicializacion")
-        self._limpiar_valores_evento()
+        self._limpiar_ev()
 
         while True:
             nombre, t, servidor = self._proximo_evento()
@@ -326,57 +326,85 @@ class Simulacion:
             if nombre == "Llegada cliente":
                 self._evento_llegada()
             elif nombre.startswith("Fin carga"):
-                self._fin_carga(servidor)               # type: ignore[arg-type]
+                self._fin_carga(servidor)
             elif "Gomeria" in nombre:
-                self._fin_gomeria(servidor)             # type: ignore[arg-type]
+                self._fin_gomeria(servidor)
             elif "Accesorios" in nombre:
-                self._fin_accesorios(servidor)          # type: ignore[arg-type]
+                self._fin_accesorios(servidor)
 
             self._actualizar_maximos()
             self._registrar_fila(nombre)
-            self._limpiar_valores_evento()
+            self._limpiar_ev()
 
     def _registrar_fila(self, evento: str):
+        ev = self._ev
         fila = {
             "N": self.n_evento,
             "Evento": evento,
-            "Reloj (s)": round(self.reloj, 2),
-
-            "RND1 lleg.": self.rnd_lleg1,
-            "RND2 lleg.": self.rnd_lleg2,
-            "T entre lleg. (s)": self.t_lleg,
-            "Prox. llegada": (round(self.prox_llegada, 2)
-                              if self.prox_llegada != float("inf")
-                              else "---"),
-
-            "RND tipo": self.ult_rnd_tipo,
-            "RND subruta": self.ult_rnd_sub,
-            "RND post-carga": self.ult_rnd_post,
-
-            "RND carga": self.ult_rnd_carga,
-            "T carga (s)": self.ult_t_carga,
-
-            "RND gomeria": self.ult_rnd_gom,
-            "T gomeria (s)": self.ult_t_gom,
-
-            "RND acces.": self.ult_rnd_acc,
-            "T acces. (s)": self.ult_t_acc,
+            "Reloj": round(self.reloj, 2),
         }
 
-        for s in self.surtidores + self.gomerias + self.accesorios_list:
-            fila[s.nombre] = self._estado_servidor(s)
+        # llegada_cliente
+        fila["RND1 lleg."] = ev.get("RND1 lleg.")
+        fila["RND2 lleg."] = ev.get("RND2 lleg.")
+        fila["T entre lleg. (s)"] = ev.get("T entre lleg. (s)")
+        fila["Prox. llegada"] = ev.get("Prox. llegada",
+            round(self.prox_llegada, 2) if self.prox_llegada != float("inf") else "---")
 
+        # tipo de servicio
+        fila["RND servicio"] = ev.get("RND servicio")
+        fila["Tipo servicio"] = ev.get("Tipo servicio")
+
+        # fin_carga_combustible
+        fila["RND carga"] = ev.get("RND carga")
+        fila["T carga (s)"] = ev.get("T carga (s)")
+        fila["Fin carga"] = ev.get("Fin carga")
+
+        # fin_atencion_venta_accesorio
+        fila["RND acces."] = ev.get("RND acces.")
+        fila["T acces. (s)"] = ev.get("T acces. (s)")
+        fila["Fin acces."] = ev.get("Fin acces.")
+
+        # fin_atencion_gomeria
+        fila["RND gomeria"] = ev.get("RND gomeria")
+        fila["T gomeria (s)"] = ev.get("T gomeria (s)")
+        fila["Fin gomeria"] = ev.get("Fin gomeria")
+
+        # evento extra / ruteo
+        fila["Cargo comb?"] = ev.get("Cargo comb?")
+        fila["RND post"] = ev.get("RND post")
+        fila["Que hace luego"] = ev.get("Que hace luego")
+
+        # servidores + colas
+        for s in self.surtidores:
+            fila[s.nombre] = self._estado_servidor(s)
         fila["Cola surt."] = len(self.cola_surtidor)
+
+        for s in self.gomerias:
+            fila[s.nombre] = self._estado_servidor(s)
         fila["Cola gom."] = len(self.cola_gomeria)
+
+        for s in self.accesorios_list:
+            fila[s.nombre] = self._estado_servidor(s)
         fila["Cola acces."] = len(self.cola_accesorios)
 
+        # estadisticas
         fila["Max cola surt."] = self.stats.cola_max_surtidor
         fila["Max cola gom."] = self.stats.cola_max_gomeria
         fila["Max cola acces."] = self.stats.cola_max_accesorios
-        fila["Max T sistema (s)"] = round(self.stats.tiempo_max_sistema, 2)
+        fila["Max T sist. (s)"] = round(self.stats.tiempo_max_sistema, 2)
 
+        # objetos temporales: 5 sub-columnas por cliente
         for cid in sorted(self.clientes.keys()):
-            fila[f"C{cid}"] = self.clientes[cid].estado
+            c = self.clientes[cid]
+            prefix = f"C{cid}"
+            fila[f"{prefix}_estado"] = c.estado
+            fila[f"{prefix}_tipo"] = c.tipo
+            fila[f"{prefix}_llegada"] = round(c.llegada, 2)
+            fila[f"{prefix}_espera"] = (round(c.inicio_espera, 2)
+                                        if c.inicio_espera is not None else "")
+            fila[f"{prefix}_fin"] = (round(c.fin_atencion, 2)
+                                     if c.fin_atencion is not None else "")
 
         self.filas.append(fila)
 
@@ -403,26 +431,23 @@ def main():
     p.add_argument("-s", "--semilla", type=int, default=None)
     p.add_argument("--desde", type=int, default=0)
     p.add_argument("--cantidad", type=int, default=None)
-    p.add_argument("-o", "--salida", type=str, default="estacion_servicio.html")
-    p.add_argument("--abrir", action="store_true")
     p.add_argument("--surtidores", type=int, default=3)
     p.add_argument("--gomerias", type=int, default=2)
     p.add_argument("--accesorios", type=int, default=1)
     p.add_argument("--lleg-media", type=float, default=24.0)
     p.add_argument("--lleg-desv", type=float, default=23.0)
-    p.add_argument("--carga-a", type=float, default=45.0, help="Carga: min (seg)")
-    p.add_argument("--carga-b", type=float, default=55.0, help="Carga: max (seg)")
-    p.add_argument("--gom-a", type=float, default=10.0, help="Gomeria: min (min)")
-    p.add_argument("--gom-b", type=float, default=26.0, help="Gomeria: max (min)")
-    p.add_argument("--acc-a", type=float, default=1.0, help="Accesorios: min (min)")
-    p.add_argument("--acc-b", type=float, default=5.0, help="Accesorios: max (min)")
+    p.add_argument("--carga-a", type=float, default=45.0)
+    p.add_argument("--carga-b", type=float, default=55.0)
+    p.add_argument("--gom-a", type=float, default=10.0)
+    p.add_argument("--gom-b", type=float, default=26.0)
+    p.add_argument("--acc-a", type=float, default=1.0)
+    p.add_argument("--acc-b", type=float, default=5.0)
     p.add_argument("--p-carga", type=float, default=0.80)
     p.add_argument("--p-no-carga-acc", type=float, default=0.40)
     p.add_argument("--p-post-carga-acc", type=float, default=0.30)
     p.add_argument("--p-post-carga-gom", type=float, default=0.20)
 
     args = p.parse_args()
-
     cfg = Config(
         n_clientes=args.clientes, semilla=args.semilla,
         n_surtidores=args.surtidores, n_gomerias=args.gomerias,
@@ -436,13 +461,10 @@ def main():
         p_post_carga_gom=args.p_post_carga_gom,
         desde=args.desde, cantidad=args.cantidad,
     )
-
     sim = Simulacion(cfg)
     sim.ejecutar()
-
-    total = len(sim.filas)
     print(f"Clientes arribados : {sim.arribados}")
-    print(f"Eventos totales    : {total - 1}")
+    print(f"Eventos totales    : {len(sim.filas) - 1}")
     print(f"Cola max surt.     : {sim.stats.cola_max_surtidor}")
     print(f"Cola max gomeria   : {sim.stats.cola_max_gomeria}")
     print(f"Cola max acces.    : {sim.stats.cola_max_accesorios}")

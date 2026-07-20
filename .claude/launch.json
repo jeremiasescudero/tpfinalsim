@@ -6,6 +6,7 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["app.py"],
       "port": 5000,
+      "autoPort": true,
       "cwd": "C:\\Users\\jerem\\OneDrive\\Escritorio\\tpfinalsim"
     }
   ]

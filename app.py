@@ -125,14 +125,17 @@ th.evt       { background: #37474f; color: #fff; }
 th.lleg      { background: #1976d2; color: #fff; }
 th.ruta      { background: #6a1b9a; color: #fff; }
 th.srv-carga { background: #ef6c00; color: #fff; }
-th.srv-gom   { background: #2e7d32; color: #fff; }
 th.srv-acc   { background: #c2185b; color: #fff; }
+th.srv-gom   { background: #2e7d32; color: #fff; }
+th.ruta2     { background: #4a148c; color: #fff; }
 th.servs     { background: #455a64; color: #fff; }
-th.colas     { background: #00838f; color: #fff; }
+th.servs2    { background: #00695c; color: #fff; }
+th.servs3    { background: #ad1457; color: #fff; }
 th.stats     { background: #b71c1c; color: #fff; }
 th.cli       { background: #5d4037; color: #fff; }
 
 td.evento { text-align: left; font-weight: 600; }
+td.ruta, td.ruta2 { text-align: left; }
 td.cli    { text-align: left; font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
 
 .empty { text-align: center; padding: 80px 20px; color: var(--text2); flex: 1;
@@ -258,45 +261,58 @@ def build_tabla(sim: Simulacion, desde: int, cantidad):
     nombres_acc = [s.nombre for s in sim.accesorios_list]
 
     grupos = [
-        ("evt", "Evento", ["N", "Evento", "Reloj (s)"]),
-        ("lleg", "Proxima llegada",
+        ("evt", "Evento", ["N", "Evento", "Reloj"]),
+        ("lleg", "Llegada cliente",
             ["RND1 lleg.", "RND2 lleg.", "T entre lleg. (s)", "Prox. llegada"]),
-        ("ruta", "Ruteo cliente",
-            ["RND tipo", "RND subruta", "RND post-carga"]),
-        ("srv-carga", "Servicio: carga", ["RND carga", "T carga (s)"]),
-        ("srv-gom", "Servicio: gomeria", ["RND gomeria", "T gomeria (s)"]),
-        ("srv-acc", "Servicio: accesorios", ["RND acces.", "T acces. (s)"]),
-        ("servs", "Estado servidores",
-            nombres_surt + nombres_gom + nombres_acc),
-        ("colas", "Longitud colas",
-            ["Cola surt.", "Cola gom.", "Cola acces."]),
-        ("stats", "Estadisticas maximas",
+        ("ruta", "Tipo de servicio",
+            ["RND servicio", "Tipo servicio"]),
+        ("srv-carga", "Fin carga combustible",
+            ["RND carga", "T carga (s)", "Fin carga"]),
+        ("srv-acc", "Fin atencion accesorios",
+            ["RND acces.", "T acces. (s)", "Fin acces."]),
+        ("srv-gom", "Fin atencion gomeria",
+            ["RND gomeria", "T gomeria (s)", "Fin gomeria"]),
+        ("ruta2", "Evento extra",
+            ["Cargo comb?", "RND post", "Que hace luego"]),
+        ("servs", "Surtidores", nombres_surt + ["Cola surt."]),
+        ("servs2", "Empleados gomeria", nombres_gom + ["Cola gom."]),
+        ("servs3", "Accesorios", nombres_acc + ["Cola acces."]),
+        ("stats", "Variables estadisticas",
             ["Max cola surt.", "Max cola gom.", "Max cola acces.",
-             "Max T sistema (s)"]),
+             "Max T sist. (s)"]),
     ]
 
-    dinam = set()
+    # detectar objetos temporales (5 sub-columnas por cliente)
+    cli_ids = set()
     for f in ventana:
         for k in f.keys():
-            if k.startswith("C") and k[1:].isdigit():
-                dinam.add(k)
-    dinam_orden = sorted(dinam, key=lambda x: int(x[1:]))
+            if k.endswith("_estado"):
+                prefix = k[:-7]
+                if prefix.startswith("C") and prefix[1:].isdigit():
+                    cli_ids.add(int(prefix[1:]))
+    cli_ids_orden = sorted(cli_ids)
 
+    SUB_COLS = ["Estado", "Tipo", "Llegada", "Ini espera", "Fin atencion"]
+
+    # thead row 1 (grupos)
     thead1 = ""
     for clave, titulo, cols in grupos:
         thead1 += (f'<th class="{clave}" colspan="{len(cols)}">'
                    f'{html_mod.escape(titulo)}</th>')
-    if dinam_orden:
-        thead1 += (f'<th class="cli" colspan="{len(dinam_orden)}">'
-                   f'Objetos temporales (clientes)</th>')
+    for cid in cli_ids_orden:
+        thead1 += (f'<th class="cli" colspan="{len(SUB_COLS)}">'
+                   f'Cliente {cid}</th>')
 
+    # thead row 2 (columnas individuales)
     thead2 = ""
     for clave, _, cols in grupos:
         for c in cols:
             thead2 += f'<th class="{clave}">{html_mod.escape(c)}</th>'
-    for c in dinam_orden:
-        thead2 += f'<th class="cli">{html_mod.escape(c)}</th>'
+    for cid in cli_ids_orden:
+        for sc in SUB_COLS:
+            thead2 += f'<th class="cli">{html_mod.escape(sc)}</th>'
 
+    # tbody
     filas_html = []
     for f in ventana:
         celdas = []
@@ -305,8 +321,11 @@ def build_tabla(sim: Simulacion, desde: int, cantidad):
                 extra = " evento" if c == "Evento" else ""
                 celdas.append(
                     f'<td class="{clave}{extra}">{_fmt(f.get(c))}</td>')
-        for c in dinam_orden:
-            celdas.append(f'<td class="cli">{_fmt(f.get(c, ""))}</td>')
+        for cid in cli_ids_orden:
+            prefix = f"C{cid}"
+            for suffix in ["_estado", "_tipo", "_llegada", "_espera", "_fin"]:
+                key = f"{prefix}{suffix}"
+                celdas.append(f'<td class="cli">{_fmt(f.get(key, ""))}</td>')
         filas_html.append("<tr>" + "".join(celdas) + "</tr>")
 
     tmax_min = sim.stats.tiempo_max_sistema / 60
@@ -388,5 +407,7 @@ def index():
 
 
 if __name__ == "__main__":
-    print("  Abri http://localhost:5000 en tu navegador")
-    app.run(debug=True, port=5000)
+    import os
+    port = int(os.environ.get("PORT", 5000))
+    print(f"  Abri http://localhost:{port} en tu navegador")
+    app.run(debug=True, port=port)
